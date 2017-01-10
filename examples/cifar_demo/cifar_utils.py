@@ -18,7 +18,7 @@ def recover_pixels(x):
     return np.transpose(x.reshape(3, 32, 32), (1, 2, 0))
 
 
-def plot_random_images(images, labels, num_rows):
+def show_example_images(images, labels, num_rows):
     imgs_per_row = 8
     num_images = imgs_per_row * num_rows
     idxs = np.random.randint(0, len(labels), num_images)
