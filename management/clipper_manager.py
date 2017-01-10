@@ -109,15 +109,15 @@ class Cluster:
             sudo("docker-compose up -d query_frontend")
             print("Clipper is running")
 
-    def add_app(
-            self,
-            name,
-            candidate_models,
-            input_type,
-            output_type="double",
-            selection_policy="bandit_policy",
-            slo_micros=20000):
-
+    def register_application(self, **kwargs):
+        name = kwargs.pop('name')
+        candidate_models = kwargs.pop('candidate_models')
+        input_type = kwargs.pop('input_type')
+        output_type = kwargs.pop('output_type', "double")
+        selection_policy = kwargs.pop('selection_policy', "bandit_policy")
+        slo_micros = kwargs.pop('slo_micros', 20000)
+        if kwargs:
+            raise TypeError('Unexpected **kwargs: %r' % kwargs)
         url = "http://%s:1338/admin/add_app" % self.host
         req_json = json.dumps({
             "name": name,
@@ -162,7 +162,12 @@ class Cluster:
             else:
                 warn("Application \"%s\" not found" % name)
 
-    def get_selection_state(self, app_name, uid):
+    def get_bandit_weights(self, **kwargs):
+        app_name = kwargs.pop('app_name')
+        uid = kwargs.pop('uid')
+        if kwargs:
+            raise TypeError('Unexpected **kwargs: %r' % kwargs)
+
         url = "http://%s:1338/admin/get_state" % self.host
         req_json = json.dumps({
             "app_name": app_name,
@@ -172,17 +177,10 @@ class Cluster:
         r = requests.post(url, headers=headers, data=req_json)
         return r.text
 
-    def add_sklearn_model(
-        self,
-        name,
-        version,
-        model,
-        container_name,
-        labels,
-        input_type,
-     num_containers=1):
+
+    def deploy_model(self, **kwargs):
         """
-        Add a Scikit-Learn model to Clipper.
+        Add a model model to Clipper.
 
         Args:
             name(str):      The name to assign this model.
@@ -198,40 +196,34 @@ class Cluster:
             num_containers(int optional): The number of replicas of the model to create. You can
             also create more replicas later.
         """
-        if isinstance(model, base.BaseEstimator):
+
+        name = kwargs.pop('name')
+        version = kwargs.pop('version')
+        model_data = kwargs.pop('model_data')
+        container_name = kwargs.pop('container_name')
+        labels = kwargs.pop('labels')
+        input_type = kwargs.pop('input_type')
+        num_containers = kwargs.pop('num_containers', 1)
+
+        if kwargs:
+            raise TypeError('Unexpected **kwargs: %r' % kwargs)
+
+        if isinstance(model_data, base.BaseEstimator):
             fname = name.replace("/", "_")
             pkl_path = '/tmp/%s/%s.pkl' % (fname, fname)
-            data_path = "/tmp/%s" % fname
+            model_data_path = "/tmp/%s" % fname
             try:
                 os.mkdir(data_path)
             except OSError:
                 pass
-                # print("directory already exists. Might overwrite existing file")
-            joblib.dump(model, pkl_path)
-        elif isinstance(model, str):
-            # assume that model is a model_path
-            data_path = model
+            joblib.dump(model_data, pkl_path)
+        elif isinstance(model_data, str):
+            # assume that model_data is a path to the serialized model
+            model_data_path = model_data
         else:
             warn("%s is invalid model format" % str(type(model)))
             return False
-        return self.add_model(
-            name,
-            version,
-            data_path,
-            container_name,
-            labels,
-            input_type,
-            num_containers)
 
-    def add_model(
-        self,
-        name,
-        version,
-        model_path,
-        container_name,
-        labels,
-        input_type,
-     num_containers=1):
         if (not self.put_container_on_host(container_name)):
             return False
         print("Container %s available on host" % container_name)
@@ -245,7 +237,7 @@ class Cluster:
 
         with cd(vol):
             with hide("warnings", "output", "running"):
-                if model_path.startswith("s3://"):
+                if model_data_path.startswith("s3://"):
                     with hide("warnings", "output", "running"):
                         aws_cli_installed = run(
                             "dpkg-query -Wf'${db:Status-abbrev}' awscli 2>/dev/null | grep -q '^i'",
@@ -261,17 +253,17 @@ class Cluster:
                                 access_key=os.environ["AWS_ACCESS_KEY_ID"],
                                 secret_key=os.environ["AWS_SECRET_ACCESS_KEY"]))
 
-                    run("aws s3 cp {model_path} {dl_path} --recursive".format(
-                            model_path=model_path, dl_path=os.path.join(
-                                vol, os.path.basename(model_path))))
+                    run("aws s3 cp {model_data_path} {dl_path} --recursive".format(
+                            model_data_path=model_data_path, dl_path=os.path.join(
+                                vol, os.path.basename(model_data_path))))
                 else:
                     with hide("output", "running"):
-                        put(model_path, ".")
+                        put(model_data_path, ".")
 
         print("Copied model data to host")
         if not self.publish_new_model(name, version, labels, input_type,
                                       container_name,
-                                      os.path.join(vol, os.path.basename(model_path))):
+                                      os.path.join(vol, os.path.basename(model_data_path))):
             return False
         else:
             print("Published model to Clipper")
@@ -409,15 +401,6 @@ class Cluster:
                  "container docker image")
             return False
 
-    # def get_selection_state(self, app_name, uid):
-    #     url = "http://%s:1338/admin/get_state" % self.host
-    #     req_json = json.dumps({
-    #         "app_name": app_name,
-    #         "uid": uid
-    #     })
-    #     headers = {'Content-type': 'application/json'}
-    #     r = requests.post(url, headers=headers, data=req_json)
-    #     return r.text
 
     def stop_all(self):
         print("Stopping Clipper and all running models...")
@@ -438,8 +421,8 @@ class Cluster:
             sudo("docker pull clipper/query_frontend:test")
             sudo("docker pull clipper/management_frontend:test")
             sudo("docker pull redis")
-            sudo("docker pull clipper/sklearn_cifar_container")
-            sudo("docker pull clipper/tf_cifar_container")
+            sudo("docker pull clipper/sklearn_cifar_container:test")
+            sudo("docker pull clipper/tf_cifar_container:test")
 
 ############################################################################
 
@@ -452,21 +435,4 @@ class Cluster:
             s = r.json()
         except TypeError:
             s = r.text
-        return s
-
-    def get_selection_state_model(self, uid):
-        # for h in self.hosts:
-        url = "http://%s:1337/correctionmodel" % self.host
-        data = {"uid": uid, }
-        req_json = json.dumps(data)
-        headers = {'Content-type': 'application/json'}
-        r = requests.post(url, headers=headers, data=req_json)
-        # print(r.text)
-        try:
-            # s = json.dumps(r.json(), indent=4)
-            s = r.json()
-        except TypeError:
-            s = r.text
-        return s
-        # print(json.dumps(r.json(), indent=4))
         return s
