@@ -79,10 +79,10 @@ class Cluster:
         with hide("warnings", "output", "running"):
             print("Checking if Docker is running...")
             sudo("docker ps")
-            print("Found Docker running")
-            print("Checking if docker-compose is installed...")
+            # print("Found Docker running")
+            # print("Checking if docker-compose is installed...")
             dc_installed = sudo("docker-compose --version", warn_only=True)
-            print("Found docker-compose installed")
+            # print("Found docker-compose installed")
             if dc_installed.return_code != 0:
                 print("docker-compose not installed on host.")
                 print("attempting to install it")
@@ -91,7 +91,7 @@ class Cluster:
                      "> /usr/local/bin/docker-compose")
                 sudo("chmod +x /usr/local/bin/docker-compose")
 
-            print("Creating internal Docker network")
+            # print("Creating internal Docker network")
             nw_create_command = ("docker network create --driver bridge {nw}"
                                  .format(nw=DOCKER_NW))
             sudo(nw_create_command, warn_only=True)
@@ -175,7 +175,13 @@ class Cluster:
         })
         headers = {'Content-type': 'application/json'}
         r = requests.post(url, headers=headers, data=req_json)
-        return r.text
+        raw_weights = r.text
+        def extract_model(m):
+            ps = m.split(":")
+            print(ps[0] + ": " + ps[2])
+            return ((ps[0]+":"+ps[1]), float(ps[2]))
+        weights = [extract_model(m) for m in raw_weights.split(",")]
+        return weights
 
 
     def deploy_model(self, **kwargs):
@@ -278,43 +284,44 @@ class Cluster:
         Clipper. This method will fail if you have not already called
         Cluster.add_model() for the provided name and version.
         """
-        # Look up model info in Redis
-        model_key = "{mn}:{mv}".format(mn=model_name, mv=model_version)
-        result = local("redis-cli -h {host} -p 6379 -n {db} hgetall {key}".format(
-            host=self.host, key=model_key, db=REDIS_MODEL_DB_NUM), capture=True)
+        with hide("warnings", "output", "running"):
+            # Look up model info in Redis
+            model_key = "{mn}:{mv}".format(mn=model_name, mv=model_version)
+            result = local("redis-cli -h {host} -p 6379 -n {db} hgetall {key}".format(
+                host=self.host, key=model_key, db=REDIS_MODEL_DB_NUM), capture=True)
 
-        if "nil" in result.stdout:
-            # Model not found
-            warn(
-                "Trying to add container but model {mn}:{mv} not in "
-                "Redis".format(
+            if "nil" in result.stdout:
+                # Model not found
+                warn(
+                    "Trying to add container but model {mn}:{mv} not in "
+                    "Redis".format(
+                        mn=model_name,
+                        mv=model_version))
+                return False
+
+            splits = result.stdout.split("\n")
+            model_metadata = dict([(splits[i].strip(),
+                                    splits[i + 1].strip())
+                                for i in range(0, len(splits),
+                                                2)])
+            image_name = model_metadata["container_name"]
+            model_data_path = model_metadata["model_data_path"]
+            model_input_type = model_metadata["input_type"]
+
+            # Start container
+            add_container_cmd = (
+                "docker run -d --network={nw} -v {path}:/model:ro "
+                "-e \"CLIPPER_MODEL_NAME={mn}\" -e \"CLIPPER_MODEL_VERSION={mv}\" "
+                "-e \"CLIPPER_IP=query_frontend\" -e \"CLIPPER_INPUT_TYPE={mip}\" "
+                "{image}".format(
+                    path=model_data_path,
+                    nw=DOCKER_NW,
+                    image=image_name,
                     mn=model_name,
-                    mv=model_version))
-            return False
-
-        splits = result.stdout.split("\n")
-        model_metadata = dict([(splits[i].strip(),
-                                splits[i + 1].strip())
-                               for i in range(0, len(splits),
-                                              2)])
-        image_name = model_metadata["container_name"]
-        model_data_path = model_metadata["model_data_path"]
-        model_input_type = model_metadata["input_type"]
-
-        # Start container
-        add_container_cmd = (
-            "docker run -d --network={nw} -v {path}:/model:ro "
-            "-e \"CLIPPER_MODEL_NAME={mn}\" -e \"CLIPPER_MODEL_VERSION={mv}\" "
-            "-e \"CLIPPER_IP=query_frontend\" -e \"CLIPPER_INPUT_TYPE={mip}\" "
-            "{image}".format(
-                path=model_data_path,
-                nw=DOCKER_NW,
-                image=image_name,
-                mn=model_name,
-                mv=model_version,
-                mip=model_input_type))
-        result = sudo(add_container_cmd)
-        return result.return_code == 0
+                    mv=model_version,
+                    mip=model_input_type))
+            result = sudo(add_container_cmd)
+            return result.return_code == 0
 
     def publish_new_model(
         self,
