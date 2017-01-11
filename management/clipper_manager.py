@@ -208,68 +208,69 @@ class Cluster:
         if kwargs:
             raise TypeError('Unexpected **kwargs: %r' % kwargs)
 
-        if isinstance(model_data, base.BaseEstimator):
-            fname = name.replace("/", "_")
-            pkl_path = '/tmp/%s/%s.pkl' % (fname, fname)
-            model_data_path = "/tmp/%s" % fname
-            try:
-                os.mkdir(data_path)
-            except OSError:
-                pass
-            joblib.dump(model_data, pkl_path)
-        elif isinstance(model_data, str):
-            # assume that model_data is a path to the serialized model
-            model_data_path = model_data
-        else:
-            warn("%s is invalid model format" % str(type(model)))
-            return False
-
-        if (not self.put_container_on_host(container_name)):
-            return False
-        print("Container %s available on host" % container_name)
-
-        # Put model parameter data on host
-        vol = "{model_repo}/{name}/{version}".format(
-            model_repo=MODEL_REPO, name=name, version=version)
-        print(vol)
         with hide("warnings", "output", "running"):
-            run("mkdir -p {vol}".format(vol=vol))
+            if isinstance(model_data, base.BaseEstimator):
+                fname = name.replace("/", "_")
+                pkl_path = '/tmp/%s/%s.pkl' % (fname, fname)
+                model_data_path = "/tmp/%s" % fname
+                try:
+                    os.mkdir(model_data_path)
+                except OSError:
+                    pass
+                joblib.dump(model_data, pkl_path)
+            elif isinstance(model_data, str):
+                # assume that model_data is a path to the serialized model
+                model_data_path = model_data
+            else:
+                warn("%s is invalid model format" % str(type(model)))
+                return False
 
-        with cd(vol):
+            if (not self.put_container_on_host(container_name)):
+                return False
+            # print("Container %s available on host" % container_name)
+
+            # Put model parameter data on host
+            vol = "{model_repo}/{name}/{version}".format(
+                model_repo=MODEL_REPO, name=name, version=version)
+            # print(vol)
             with hide("warnings", "output", "running"):
-                if model_data_path.startswith("s3://"):
-                    with hide("warnings", "output", "running"):
-                        aws_cli_installed = run(
-                            "dpkg-query -Wf'${db:Status-abbrev}' awscli 2>/dev/null | grep -q '^i'",
-                            warn_only=True).return_code == 0
-                        if not aws_cli_installed:
-                            sudo("apt-get update -qq")
-                            sudo("apt-get install -yqq awscli")
-                        if sudo(
-                                "stat ~/.aws/config",
-                                warn_only=True).return_code != 0:
-                            run("mkdir -p ~/.aws")
-                            append("~/.aws/config", aws_cli_config.format(
-                                access_key=os.environ["AWS_ACCESS_KEY_ID"],
-                                secret_key=os.environ["AWS_SECRET_ACCESS_KEY"]))
+                run("mkdir -p {vol}".format(vol=vol))
 
-                    run("aws s3 cp {model_data_path} {dl_path} --recursive".format(
-                            model_data_path=model_data_path, dl_path=os.path.join(
-                                vol, os.path.basename(model_data_path))))
-                else:
-                    with hide("output", "running"):
-                        put(model_data_path, ".")
+            with cd(vol):
+                with hide("warnings", "output", "running"):
+                    if model_data_path.startswith("s3://"):
+                        with hide("warnings", "output", "running"):
+                            aws_cli_installed = run(
+                                "dpkg-query -Wf'${db:Status-abbrev}' awscli 2>/dev/null | grep -q '^i'",
+                                warn_only=True).return_code == 0
+                            if not aws_cli_installed:
+                                sudo("apt-get update -qq")
+                                sudo("apt-get install -yqq awscli")
+                            if sudo(
+                                    "stat ~/.aws/config",
+                                    warn_only=True).return_code != 0:
+                                run("mkdir -p ~/.aws")
+                                append("~/.aws/config", aws_cli_config.format(
+                                    access_key=os.environ["AWS_ACCESS_KEY_ID"],
+                                    secret_key=os.environ["AWS_SECRET_ACCESS_KEY"]))
 
-        print("Copied model data to host")
-        if not self.publish_new_model(name, version, labels, input_type,
-                                      container_name,
-                                      os.path.join(vol, os.path.basename(model_data_path))):
-            return False
-        else:
-            print("Published model to Clipper")
-            # aggregate results of starting all containers
-            return all([self.add_container(name, version)
-                        for r in range(num_containers)])
+                        run("aws s3 cp {model_data_path} {dl_path} --recursive".format(
+                                model_data_path=model_data_path, dl_path=os.path.join(
+                                    vol, os.path.basename(model_data_path))))
+                    else:
+                        with hide("output", "running"):
+                            put(model_data_path, ".")
+
+            print("Copied model data to host")
+            if not self.publish_new_model(name, version, labels, input_type,
+                                        container_name,
+                                        os.path.join(vol, os.path.basename(model_data_path))):
+                return False
+            else:
+                print("Published model to Clipper")
+                # aggregate results of starting all containers
+                return all([self.add_container(name, version)
+                            for r in range(num_containers)])
 
     def add_container(self, model_name, model_version):
         """

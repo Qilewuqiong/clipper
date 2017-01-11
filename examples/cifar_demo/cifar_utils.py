@@ -19,17 +19,19 @@ def recover_pixels(x):
 
 
 def show_example_images(images, labels, num_rows):
-    imgs_per_row = 8
+    imgs_per_row = 6
     num_images = imgs_per_row * num_rows
     idxs = np.random.randint(0, len(labels), num_images)
     f, axes = plt.subplots(nrows=num_rows,
                            ncols=imgs_per_row,
-                           figsize=(1.5*imgs_per_row, 2*num_rows))
+                           figsize=(1.5*imgs_per_row, 1.5*num_rows))
+
+    f.tight_layout()
     for i, idx in enumerate(idxs):
         image = recover_pixels(images[idx])
         label = labels[idx]
         cur_ax = axes[i / imgs_per_row][i % imgs_per_row]
-        cur_ax.imshow(image, interpolation="nearest")
+        cur_ax.imshow(image.astype(np.ubyte), interpolation="nearest")
         cur_ax.axis('off')
         if label == -1:
             title = classes[negative_class]
@@ -69,7 +71,7 @@ def filter_data(X, y):
     return X_train, y_train
 
 
-def cifar_update(host, app, uid, x, y):
+def cifar_update(host, app, uid, x, y, print_result=False):
     url = "http://%s:1337/%s/update" % (host, app)
     req_json = json.dumps({
         'uid': uid,
@@ -85,7 +87,8 @@ def cifar_update(host, app, uid, x, y):
     r = requests.post(url, headers=headers, data=req_json)
     end = datetime.now()
     latency = (end - start).total_seconds() * 1000.0
-    print("'%s', %f ms" % (r.text, latency))
+    if print_result:
+        print("'%s', %f ms" % (r.text, latency))
 
 
 def parse_pred(p):
@@ -148,9 +151,11 @@ def run_iteration(host, app, uid, test_x, test_y):
 
 def run_serving_workload(host, app, test_x, test_y):
     fig, (ax_acc) = plt.subplots(1, 1, sharex=True)
-    ax_acc.set_ylabel("accuracy")
+    ax_acc.set_ylabel("application accuracy")
+    ax_acc.set_xlabel("iterations")
     # DON'T SHOW LATENCY
     ax_acc.set_ylim(0, 1.0)
+    ax_acc.set_title("Superman Detection Accuracy Over Time")
     xs = []
     accs = []
     lats = []
@@ -166,12 +171,14 @@ def run_serving_workload(host, app, test_x, test_y):
         ax_acc.set_xlim(0, j + 1)
 
         ax_acc.plot(xs, accs, 'b')
+        # fig.set_size_inches(6, 3)
+        fig.tight_layout()
         fig.canvas.draw()
-        print(("Accuracy: {cor}, false positives: {fp}, "
-              "false negatives: {fn}, true positives: {tp}, "
-               "true negatives: {tn}").format(
-            cor=correct, fp=fp, fn=fn, tp=tp, tn=tn))
-        print("Mean latency: {lat} ms".format(lat=mean_lat))
+        # print(("Accuracy: {cor}, false positives: {fp}, "
+        #       "false negatives: {fn}, true positives: {tp}, "
+        #        "true negatives: {tn}").format(
+        #     cor=correct, fp=fp, fn=fn, tp=tp, tn=tn))
+        # print("Mean latency: {lat} ms".format(lat=mean_lat))
 
 
 def run_serving_workload_show_latency(host, app, test_x, test_y):
@@ -207,7 +214,7 @@ def run_serving_workload_show_latency(host, app, test_x, test_y):
         print("Mean latency: {lat} ms".format(lat=mean_lat))
 
 
-def send_updates(host, app, test_x, test_y, num_updates):
+def enable_feedback(host, app, test_x, test_y, num_updates):
     uid = DEMO_UID
     for i in range(num_updates):
         example_num = np.random.randint(0, len(test_y))
