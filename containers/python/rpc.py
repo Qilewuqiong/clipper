@@ -96,7 +96,7 @@ class NoopContainer(ModelContainerBase):
 
 
 if __name__ == "__main__":
-	
+
     if len(sys.argv) < 4:
 	print("Invalid arguments")
 	print("Usage:")
@@ -106,6 +106,7 @@ if __name__ == "__main__":
 	server = Server(context, sys.argv[1], sys.argv[2])
 	model_name = sys.argv[3]
 	version = int(sys.argv[4])
+	print("Starting container for model: %s:%d" % (model_name, version))
 	server.model_name = model_name
 	server.model_version = version
 	server.model = NoopContainer()
