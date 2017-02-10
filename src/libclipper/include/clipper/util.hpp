@@ -1,11 +1,9 @@
 #ifndef CLIPPER_LIB_UTIL_H
 #define CLIPPER_LIB_UTIL_H
 
+#include <cassert>
 #include <condition_variable>
 #include <queue>
-// uncomment to disable assert()
-// #define NDEBUG
-#include <cassert>
 
 #include "boost/optional.hpp"
 #include "boost/thread.hpp"
